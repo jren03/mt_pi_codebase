@@ -1,0 +1,2 @@
+[TYPECHECK]
+ignored-modules=cv2,open3d,pyrealsense2,websockets

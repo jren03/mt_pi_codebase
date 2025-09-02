@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Object Manipulation</title>
+  <style>
+    body { margin: 0; overflow: hidden; background-color: white; } /* Set background color to white */
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three/examples/js/loaders/OBJLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three/examples/js/controls/TransformControls.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/msgpack-lite/0.1.26/msgpack.min.js"></script>
+
+  <script>
+
+    // Setup scene
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const initialCameraPosition = new THREE.Vector3(0, 10, 10);
+    const initialCameraLookAt = new THREE.Vector3(0, 0, 0);
+    camera.position.copy(initialCameraPosition);
+    camera.lookAt(initialCameraLookAt);
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0xffffff); // Set background color to white
+    document.body.appendChild(renderer.domElement);
+
+    // Add 3D axes
+    const axesHelper = new THREE.AxesHelper(5);
+    axesHelper.scale.set(2, 1.5, 1);
+    axesHelper.position.set(-4, 0, -3);
+    scene.add(axesHelper);
+
+    // To visualize clicked points
+    const cubeSize = 0.10;
+    const cubeGeometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
+    const cubeMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 }); // Green color
+    const cubeMesh = new THREE.Mesh(cubeGeometry, cubeMaterial);
+    cubeMesh.position.copy(new THREE.Vector3(-10, -10, -10));
+    scene.add(cubeMesh);
+
+
+    // Declare selectedObject variable
+    let selectedObject = null;
+    let transformControl = null;
+    let originalControl = null;
+    let isTranslationMode = true;
+    let isMouseDown = false;
+    let updatePointCloud = true;
+    let timeoutId = null;
+    let isShiftDown = false;
+    let isCtrlDown = false;
+    const controlPoints = [];
+    const meshUrls = [];
+
+    // Arrow Helper for showing direction
+    const arrowRadius = 0.6;
+    const arrowHelper = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 0), new THREE.Vector3(), 1.3, 0xFFA500, arrowRadius);
+    arrowHelper.visible = false; // Initially hidden
+    scene.add(arrowHelper);
+
+    // Initialize point cloud
+    const numPoints = %s;  // Total number of points
+    const positions = new Float32Array(numPoints * 3); // Each point needs x, y, z
+    const colors = new Float32Array(numPoints * 3); // Each point needs r, g, b
+    const pointCloudGeometry = new THREE.BufferGeometry();
+    pointCloudGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    pointCloudGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3)); // Set colors attribute
+    const pointCloudMaterial = new THREE.PointsMaterial({
+        size: 0.1, // Adjust the size of the points
+        vertexColors: true, // Enable vertex colors
+    });
+    const pointCloud = new THREE.Points(pointCloudGeometry, pointCloudMaterial);
+    scene.add(pointCloud);
+    
+
+    const numBoxes = 5000; // Number of boxes
+    const boxGeometry = new THREE.BoxGeometry(0.1, 0.1, 0.1); // Small box size
+    //const boxMaterial = new THREE.MeshBasicMaterial({color: 0xff0000,  visible: true }); // Invisible material
+    const boxMaterial = new THREE.MeshBasicMaterial({visible: false }); // Invisible material
+    const instancedBoxes = new THREE.InstancedMesh(boxGeometry, boxMaterial, numBoxes);
+    // Add the instanced mesh to the scene
+    scene.add(instancedBoxes);
+    
+    function updateInstancedMeshPositions() {
+      console.log('here');
+      const positions = pointCloud.geometry.attributes.position;
+      //positions.needsUpdate = true; // Ensure the position attribute is updated
+  
+      // Check if the number of instances exceeds the number of points
+      const actualInstances = Math.min(numBoxes, positions.count);
+
+      for (let i = 0; i < actualInstances; i++) {
+        const index = Math.floor(Math.random() * positions.count); // Randomly select new position index if needed
+        const matrix = new THREE.Matrix4();
+        const position = new THREE.Vector3(
+            positions.getX(index),
+            positions.getY(index),
+            positions.getZ(index)
+        );
+
+        matrix.setPosition(position);
+        instancedBoxes.setMatrixAt(i, matrix);
+      }
+
+    instancedBoxes.instanceMatrix.needsUpdate = true; // Important to apply changes
+  }
+
+
+    // Function to add object to scene
+    function addObject(obj, index, url) {
+      selectedObject = obj;
+      scene.add(selectedObject);
+      if (index == -1) {
+        controlPoints.push(selectedObject);
+        meshUrls.push(url);
+      } else {
+        controlPoints[index] = selectedObject;
+        meshUrls[index] = url;
+      }
+    }
+
+    function updateCurvePath() {
+      // Ensure there are enough points to create a curve
+      if (controlPoints.length >= 2) {
+        // Create or update the curve based on current control points' positions
+        curve = new THREE.CatmullRomCurve3(controlPoints.map(point => point.position));
+        const points = curve.getPoints(50); // Adjust the number of points as needed
+
+        // If path exists, update its geometry. Otherwise, create a new path.
+        if (path) {
+          path.geometry.dispose(); // Dispose of old geometry
+          path.geometry = new THREE.BufferGeometry().setFromPoints(points);
+        } else {
+          const pathGeometry = new THREE.BufferGeometry().setFromPoints(points);
+          const pathMaterial = new THREE.LineBasicMaterial({ color: 0xffa500 }); // Orange color
+          path = new THREE.Line(pathGeometry, pathMaterial);
+          scene.add(path);
+        }
+      }
+    }
+
+    // Function to load object
+    function loadObject(url, position, rotation, index) {
+      const loader = new THREE.OBJLoader();
+      loader.load(
+        url,
+        function (obj) {
+          obj.traverse(function (child) {
+            if (child instanceof THREE.Mesh) {
+              child.scale.set(6.85, 6.85, 6.85);
+              child.geometry.computeBoundingSphere();
+              child.geometry.computeBoundingBox();
+              child.position.copy(position); // Set object position
+              child.quaternion.setFromEuler(rotation);
+              addObject(child.clone(), index, url);
+            }
+          });
+        },
+        undefined,
+        function (error) {
+          console.error('Error loading object:', error);
+        }
+      );
+    }
+
+    let url = 'http://localhost:8080/robotiq_closed.obj';
+    const initialPos = %s;
+    const initialRot = %s;
+    loadObject(url, initialPos, initialRot, -1);
+
+    // Create path curve
+    let curve;
+    let points;
+    let path;
+    setTimeout(() => {
+      curve = new THREE.CatmullRomCurve3(controlPoints.map(point => point.position));
+      points = curve.getPoints(50);
+      const pathGeometry = new THREE.BufferGeometry().setFromPoints(points);
+      const pathMaterial = new THREE.LineBasicMaterial({ color: 0xffa500 }); // Orange color
+      path = new THREE.Line(pathGeometry, pathMaterial);
+      scene.add(path);
+    }, 1000); // Wait for objects to load
+
+
+    // Establish WebSocket connection to the server
+    const socket = new WebSocket('ws://localhost:8765');
+
+    socket.addEventListener('message', async function (event) {
+        // Decode the MessagePack data
+        const arrayBuffer = await event.data.arrayBuffer();
+        const data = msgpack.decode(new Uint8Array(arrayBuffer));
+
+        // Update pointcloud
+        const newPositions = data.positions;
+        const newColors = data.colors;
+
+        const pointCloudGeometry = pointCloud.geometry;
+        pointCloudGeometry.attributes.position.array = new Float32Array(newPositions);
+        pointCloudGeometry.attributes.position.needsUpdate = true; // Inform Three.js to update the buffer
+        pointCloudGeometry.attributes.color.array = new Float32Array(newColors);
+        pointCloudGeometry.attributes.color.needsUpdate = true; // Inform Three.js to update the buffer
+        updateInstancedMeshPositions();
+
+        // Update selectedObject
+        if (selectedObject) {
+          // Set position to new received position
+          selectedObject.position.set(
+            data.fingertip_pos_ui[0],
+            data.fingertip_pos_ui[1],
+            data.fingertip_pos_ui[2]
+          );
+
+          // Set orientation to new received orientation
+          const euler = new THREE.Euler(
+            data.ee_euler_ui[0],
+            data.ee_euler_ui[2],
+            -1*data.ee_euler_ui[1],
+            'YZX' // order of rotations
+          );
+
+
+          const quaternion = new THREE.Quaternion().setFromEuler(euler);
+          selectedObject.quaternion.copy(quaternion);
+
+          // Change to gripper closed/open if necessary
+          const oldIndex = controlPoints.indexOf(selectedObject);
+          const url = meshUrls[oldIndex];
+          //console.log(url)
+          //console.log(data.gripper_action);
+          if ((url === 'http://localhost:8080/robotiq_closed.obj' && !data.gripper_action[0]) || (url === 'http://localhost:8080/robotiq.obj' && data.gripper_action[0])) {
+            let newUrl = '';
+            // Store position and rotation of selectedObject
+            const position = selectedObject.position.clone();
+            const rotation = selectedObject.rotation.clone();
+            if (url === 'http://localhost:8080/robotiq_closed.obj') {
+              console.log('here, opening');
+              newUrl = 'http://localhost:8080/robotiq.obj';
+            } else if (url === 'http://localhost:8080/robotiq.obj') {
+              console.log('here, closing');
+              newUrl = 'http://localhost:8080/robotiq_closed.obj';
+            }
+            scene.remove(selectedObject);
+            loadObject(newUrl, position, rotation, oldIndex);
+            updateCurvePath();
+          }
+	}
+     });
+     
+     // Listen to mouse clicks on the renderer's DOM element
+    renderer.domElement.addEventListener('click', onMouseClick, false);
+    
+    function onMouseClick(event) {
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+      mouse.x = ((event.clientX - renderer.domElement.offsetLeft) / renderer.domElement.clientWidth) * 2 - 1;
+      mouse.y = -((event.clientY - renderer.domElement.offsetTop) / renderer.domElement.clientHeight) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+
+      // Check for intersections with the instanced mesh
+      const intersects = raycaster.intersectObject(instancedBoxes, true);
+      console.log(intersects);
+  
+      if (intersects.length > 0) {
+        const instanceId = intersects[0].instanceId; // Get the instance ID
+        const instanceMatrix = new THREE.Matrix4();
+        instancedBoxes.getMatrixAt(instanceId, instanceMatrix);
+        const position = new THREE.Vector3();
+        position.setFromMatrixPosition(instanceMatrix);
+        console.log('Intersected instance at position:', position);
+        cubeMesh.position.copy(position); // Move the cubeMesh to the intersected box's position
+      }
+    }
+
+    
+    
+    // Function to send position and orientation data of the selectedObject to the server
+    function sendPositionAndOrientation(selectedObject) {
+      // Check if the selectedObject is not null
+      if (selectedObject) {
+        // Check if the WebSocket connection is open
+        if (socket.readyState === WebSocket.OPEN) {
+          // Get position and orientation of the selectedObject
+          const position = selectedObject.position;
+          const orientation = selectedObject.rotation;
+          const index = controlPoints.indexOf(selectedObject);
+          const url = meshUrls[index];
+
+          // Create data object
+          const data = {
+            position: {
+              x: position.x,
+              y: position.y,
+              z: position.z
+            },
+            orientation: {
+              x: orientation.x,
+              y: orientation.y,
+              z: orientation.z
+            },
+            url
+          };
+
+          // Send data over the WebSocket connection
+          socket.send(JSON.stringify(data));
+        } else {
+          console.error('WebSocket connection is not open');
+        }
+      } else {
+        console.log('No object selected');
+      }
+    }
+
+    // Add an event listener to handle WebSocket connection opening
+    socket.addEventListener('open', function (event) {
+      console.log('WebSocket connection opened');
+
+      // Start sending position and orientation data of the selectedObject continuously
+      setInterval(function () {
+        // Replace selectedObject with your actual selected object
+        sendPositionAndOrientation(selectedObject);
+      }, 1);
+    });
+
+    document.addEventListener('mousedown', function(event) {
+      isMouseDown = true;
+    });
+
+
+
+    function onMouseMove(event) {
+
+      event.preventDefault();
+      if (isShiftDown) {
+        const rotationSpeed = 0.005;
+        const deltaX = event.movementX;
+        const deltaY = event.movementY;
+        const spherical = new THREE.Spherical().setFromVector3(camera.position);
+        spherical.theta -= rotationSpeed * deltaX;
+        spherical.phi -= rotationSpeed * deltaY;
+        spherical.makeSafe();
+        camera.position.setFromSpherical(spherical);
+        camera.lookAt(scene.position);
+      }
+      else if (isMouseDown && !isShiftDown && isCtrlDown) {
+        // Move camera left or right based on the mouse drag direction
+        const movementX = event.movementX;
+        const movementY = event.movementY;
+        const cameraRight = new THREE.Vector3();
+        camera.getWorldDirection(cameraRight); // Get world direction facing the camera
+        cameraRight.cross(camera.up).normalize(); // Compute right direction relative to the camera
+        camera.position.addScaledVector(cameraRight, -movementX * 0.01);
+        camera.position.addScaledVector(camera.up, movementY * 0.01);
+      }
+    }
+
+    document.addEventListener('mousemove', onMouseMove);
+
+    function setTopDownView() {
+      camera.position.set(0, 13, 0); // Adjust the Y-value as needed to suit the scale of your scene
+      camera.lookAt(new THREE.Vector3(0, 0, 0));
+      console.log("Camera set to top-down view.");
+    }
+
+    function setSideView() {
+      camera.position.set(0, 2, 13); // Adjust the Y-value as needed to suit the scale of your scene
+      camera.lookAt(new THREE.Vector3(0, 0, 0));
+      console.log("Camera set to top-down view.");
+    }
+
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Shift') {
+        isShiftDown = true;
+      } else if (event.key === 'Control') {
+        isCtrlDown = true;
+        isTranslationMode = false;
+      } else if (event.key === 't') {
+        setTopDownView();
+      } else if (event.key === 's') {
+        setSideView();
+      }
+    });
+
+    document.addEventListener('keyup', function(event) {
+      if (event.key === "Control") {
+        isCtrlDown = false;
+        isTranslationMode = true;
+      } else if (event.key === 'Shift') {
+        isShiftDown = false;
+      }
+      });
+
+    function onWheel(event) {
+      event.preventDefault();
+      // Linear Zooming: Move along the camera's look-at vector
+      const zoomSpeed = 0.3;
+      const zoomDirection = event.deltaY < 0 ? 1 : -1;
+      const cameraDirection = new THREE.Vector3().subVectors(scene.position, camera.position).normalize();
+      const zoomAmount = zoomDirection * zoomSpeed;
+
+      camera.position.addScaledVector(cameraDirection, zoomAmount); // Move camera along direction vector
+      camera.lookAt(scene.position); // Ensure the camera keeps looking at the scene center
+    }
+
+    document.addEventListener('wheel', onWheel, { passive: false });
+
+
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>

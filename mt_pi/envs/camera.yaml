@@ -1,0 +1,15 @@
+cameras:
+  - name: agent1
+    serial_number: "750612070653"
+    width: 640
+    height: 480
+    use_depth: True
+    type: "realsense"
+  - name: agent2
+    serial_number: "042222070680" 
+    width: 640
+    height: 480
+    use_depth: True
+    type: "realsense"
+parallel_camera: 1
+show_camera: 1

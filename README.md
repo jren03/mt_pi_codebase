@@ -1,9 +1,10 @@
 <h1 align="center" id="top">Motion Tracks Policy (MT-&pi;)</h1>
 
 <p align="center">
-      <img src="https://img.shields.io/badge/python-3.10-blue" />
-      <a href= "https://github.com/psf/black">
-      <img src="https://img.shields.io/badge/code%20style-black-000000.svg" /></a>
+  <img src="https://img.shields.io/badge/python-3.10-blue" />
+  <a href="https://github.com/astral-sh/ruff">
+    <img src="https://img.shields.io/badge/code%20style-ruff-3f78c5.svg" />
+  </a>
 </p>
 
 

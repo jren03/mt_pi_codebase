@@ -187,7 +187,7 @@ directly on the workstation.
 
 ## Acknowledgements :pencil:
 
-This codebase is built on many files from [SPHINX](https://github.com/priyasundaresan/sphinx/tree/main), and real robot experiments done on top of [Monometis](https://github.com/hengyuan-hu/monometis). We also use a number of third-party repositories in our work, namely [HaMeR](https://github.com/geopavlakos/hamer.git), [SAM2](https://github.com/facebookresearch/segment-anything-2.git), and [Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2.git). Additionally, we thank Zi-ang Cao for his wrappers and utility functions interfacing with HaMeR. 
+We instantiate MT-π using [Diffusion Policy](https://github.com/real-stanford/diffusion_policy/tree/main), and thus several files take inspiration from their implementation. Calibration and data collection infrastructure is inspired by [SPHINX](https://github.com/priyasundaresan/sphinx/tree/main). Real robot experiments are done on top of [Monometis](https://github.com/hengyuan-hu/monometis). We also use a number of third-party repositories during the data-processing step, namely [HaMeR](https://github.com/geopavlakos/hamer.git), [SAM2](https://github.com/facebookresearch/segment-anything-2.git), and [Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2.git). Last but not least, we thank Zi-ang Cao for his wrappers and utility functions interfacing with HaMeR. 
 
 
 ## Citation
